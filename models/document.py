@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 from dateutil import parser
 
-from utils import defaut_json_serializer
+from ..utils.miscellaneous import defaut_json_serializer
 
 
 @dataclass
