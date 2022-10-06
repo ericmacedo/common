@@ -7,6 +7,8 @@ from ..utils.text import extract_ngrams
 from ..utils.miscellaneous import are_instances_of
 from .document import Document
 
+from tabulate import tabulate
+
 
 class Corpus:
     def __init__(self, output_dir: List[str] = [".", "output"]) -> None:
@@ -60,6 +62,14 @@ class Corpus:
     def as_dataframe(self) -> pd.DataFrame:
         return pd.DataFrame.from_records(doc.asdict() for doc in self.documents)
 
+    def as_series(self, key: str) -> pd.Series:
+        return pd.Series(self[key])
+
     def generate_ngrams(self) -> None:
         vocab: pd.DataFrame = extract_ngrams(self["content"])
         vocab.to_csv(**self.__vocab_dict)
+
+    def __repr__(self) -> str:
+        return tabulate([
+            ["Number of documents", len(self.index)],
+            ["Location", self.__corpus_dir]])
