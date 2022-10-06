@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Iterable
+from typing import Callable, Iterable
 
 
 def defaut_json_serializer(obj: object) -> object:
@@ -17,3 +17,9 @@ def are_instances_of(it: Iterable, dtype: object) -> bool:
         if not isinstance(current, dtype):
             return False
     return True
+
+
+def apply(s: str, *args: Callable) -> str:
+    for fn in args:
+        s = fn(s)
+    return s
