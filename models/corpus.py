@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Any, Generator, List, Tuple
 
 import pandas as pd
+from ..utils.text import extract_ngrams
 
 from ..utils.miscellaneous import are_instances_of
 from .document import Document
@@ -58,3 +59,7 @@ class Corpus:
 
     def as_dataframe(self) -> pd.DataFrame:
         return pd.DataFrame.from_records(doc.asdict() for doc in self.documents)
+
+    def generate_ngrams(self) -> None:
+        vocab: pd.DataFrame = extract_ngrams(self["content"])
+        vocab.to_csv(**self.__vocab_dict)
