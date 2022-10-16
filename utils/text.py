@@ -1,13 +1,14 @@
 import re
 import string
 from functools import lru_cache
-from typing import Any, Iterable, Tuple
+from typing import Any, Iterable, List
 
 import pandas as pd
 from nltk import pos_tag
 from nltk.corpus import stopwords, wordnet
 from nltk.stem import WordNetLemmatizer
-from sklearn.feature_extraction.text import CountVectorizer
+
+from ..utils.itertools import chunks
 
 
 def extract_name(s: str) -> str:
@@ -43,7 +44,7 @@ def get_wordnet_pos(word: str) -> Any:
     return tag_dict.get(tag, wordnet.NOUN)
 
 
-def clean_text(s: str, **kwargs) -> str:
+def clean_text(s: str, **kwargs) -> str | Iterable[str]:
     # Kwargs
     __stop_words = kwargs.get("remove_stop_words", True)
     __lowercase = kwargs.get("lowercase", True)
@@ -53,6 +54,7 @@ def clean_text(s: str, **kwargs) -> str:
     __punctuation = kwargs.get("remove_punctuation", True)
     __numbers = kwargs.get("remove_numbers", True)
     __lemmatize = kwargs.get("lemmatize", True)
+    __as_string = kwargs.get("as_string", True)
 
     stop_words = [*set(stopwords.words("english"))
                   .union(kwargs.get("stop_words", []))
@@ -92,26 +94,26 @@ def clean_text(s: str, **kwargs) -> str:
                 token, get_wordnet_pos(token)
             ) if __lemmatize else token)
 
-    return " ".join(tokens).strip()
+    return " ".join(tokens).strip() if __as_string else tokens
 
 
-def extract_ngrams(corpus: Iterable[str], ngram_range: Tuple[int] = (1, 3),
-                   vocabulary: Iterable[str] = None) -> pd.DataFrame:
-    params = {
-        "ngram_range": ngram_range,
-        "preprocessor": clean_text,
-        "vocabulary": vocabulary}
-    vectorizer = CountVectorizer(**params)
+def extract_ngrams(s: str, **kwargs) -> pd.DataFrame:
+    # TODO make it multi core
+    sort_by = kwargs.get("sort_by", "frequency")
+    reverse = kwargs.get("reverse", True)
+    ngrams = {}
 
-    ngrams = vectorizer.fit_transform(corpus)
-    ngrams_frequency = ngrams.toarray().sum(axis=0)
-
-    vocab = vectorizer.vocabulary_
+    s = clean_text(s, as_string=False)
+    for token in s:
+        ngrams[token] = ngrams.get(token, 0) + 1
 
     df_ngram = pd.DataFrame(
-        sorted([(ngram, ngrams_frequency[index])
-               for ngram, index in vocab.items()],
-               reverse=True, key=lambda item: item[0])
+        sorted([(ngram, frequency) for ngram, frequency in ngrams.items()],
+               reverse=reverse, key=lambda i: i[0 if sort_by == "ngram" else 1])
     ).rename(columns={0: 'ngrams', 1: 'frequency'})
 
     return df_ngram
+
+
+def wrap_sentence(s: str, n: int = None) -> List[str]:
+    return [" ".join(chunk) for chunk in chunks(s.split(), n)]
