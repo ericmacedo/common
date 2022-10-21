@@ -3,28 +3,34 @@ from multiprocessing import Process, Queue
 from typing import Iterable, List
 import pickle
 
+from ..utils.text import wrap_sentence
+
 
 @dataclass
 class SBert:
     model_name: str
     embeddings: list = field(default_factory=list)
 
-    def __init__(self, model_name: str = "allenai-specter"):
+    def __init__(self, model_name: str = "sentence-transformers/allenai-specter"):
         self.model_name = model_name
         self.embeddings = []
 
-    def _train(self, queue: Queue, corpus: List[str]):
+    def _train(self, queue: Queue, corpus: Iterable[str]):
         from sentence_transformers import SentenceTransformer
 
         transformer = SentenceTransformer(self.model_name)
-        embeddings = transformer.encode(corpus).tolist()
+
+        embeddings = [
+            transformer.encode(
+                wrap_sentence(document, n=500)
+            ).mean(axis=0).tolist() for document in corpus]
 
         del transformer
         SBert.clear_memory()
 
         queue.put(embeddings)
 
-    def train(self, corpus: List[str]) -> list:
+    def train(self, corpus: Iterable[str]) -> list:
         queue = Queue()
         p = Process(
             target=self._train,
