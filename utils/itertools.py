@@ -1,5 +1,5 @@
 from itertools import islice, tee
-from typing import Any, Generator, Iterable
+from typing import Any, Generator, Iterable, List
 from numpy.random import RandomState
 
 
@@ -39,6 +39,9 @@ class SubscriptableGenerator:
     def __copy(self) -> Generator:
         self.__iterable, it = tee(self.__iterable)
         return it
+
+    def to_list(self) -> List[Any]:
+        return [*self.__copy()]
 
 
 def chunks(lst: Iterable[Any], n: int) -> Generator:
