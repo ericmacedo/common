@@ -1,9 +1,8 @@
 import re
 import string
 from functools import lru_cache
-from typing import Any, Iterable, List
+from typing import Any, Iterable, List, Dict
 
-import pandas as pd
 from nltk import pos_tag
 from nltk.corpus import stopwords, wordnet
 from nltk.stem import WordNetLemmatizer
@@ -97,7 +96,7 @@ def clean_text(s: str, **kwargs) -> str | Iterable[str]:
     return " ".join(tokens).strip() if __as_string else tokens
 
 
-def extract_ngrams(s: str, **kwargs) -> pd.DataFrame:
+def extract_ngrams(s: str, **kwargs) -> Dict:
     # TODO make it multi core
     sort_by = kwargs.get("sort_by", "frequency")
     reverse = kwargs.get("reverse", True)
@@ -107,12 +106,9 @@ def extract_ngrams(s: str, **kwargs) -> pd.DataFrame:
     for token in s:
         ngrams[token] = ngrams.get(token, 0) + 1
 
-    df_ngram = pd.DataFrame(
-        sorted([(ngram, frequency) for ngram, frequency in ngrams.items()],
-               reverse=reverse, key=lambda i: i[0 if sort_by == "ngram" else 1])
-    ).rename(columns={0: 'ngrams', 1: 'frequency'})
-
-    return df_ngram
+    return dict(sorted(
+                ngrams.items(), reverse=reverse,
+                key=lambda item: item[0 if sort_by == "ngram" else 1]))
 
 
 def wrap_sentence(s: str, n: int = None) -> List[str]:
