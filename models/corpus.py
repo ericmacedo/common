@@ -29,6 +29,11 @@ class CorpusBase(ABC):
         pass
 
     @property
+    @abstractmethod
+    def vocab(self) -> List[str]:
+        pass
+
+    @property
     def documents(self) -> Generator[Document, None, None]:
         for doc in self.index:
             yield Document.load(self._corpus_dir.joinpath(f"{doc}.json"))
@@ -82,9 +87,24 @@ class CorpusView(CorpusBase):
 
         self.__index = [*index]
 
+        ngrams = set()
+        for document in self:
+            for ngram, _ in document.ngrams.items():
+                ngrams.add(ngram)
+
+        self.__vocab: VocabView = VocabView(
+            index=[NGram.hash(ngram) for ngram in ngrams],
+            output_dir=[p for p in str(
+                self._output_dir.relative_to(self._output_dir.parent)
+            ).split(os.sep)])
+
     @property
     def index(self) -> List[str]:
         return self.__index
+
+    @property
+    def vocab(self) -> List[str]:
+        return self.__vocab
 
 
 class Corpus(CorpusBase):

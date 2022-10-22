@@ -1,15 +1,15 @@
 from __future__ import annotations
+
 import json
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from hashlib import md5
 from pathlib import Path
-from typing import Any, Dict, Generator, Iterable, List
+from typing import Any, ClassVar, Dict, Generator, Iterable, List
 
 import pandas as pd
-from tabulate import tabulate
-
 from common.utils.itertools import SubscriptableGenerator
+from tabulate import tabulate
 
 from ..utils.miscellaneous import defaut_json_serializer
 
@@ -19,6 +19,8 @@ class NGram:
     ngram: str
     frequency: int
     embedding: List[float] = field(default_factory=list)
+
+    FIELDS: ClassVar[List[str]] = ["ngram", "frequency", "embedding"]
 
     def asdict(self) -> Dict:
         return asdict(self)
