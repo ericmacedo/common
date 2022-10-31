@@ -1,70 +1,68 @@
-import os
-from abc import ABC, abstractmethod
-from pathlib import Path
-from typing import Any, Generator, Iterable, List, Tuple
+from abc import ABC
+from typing import Any, Generator, Iterable, Tuple
 
 import pandas as pd
+from pyparsing import abstractmethod
 from tabulate import tabulate
+from ..helpers.db import DB
+
+from ..helpers.orm import session_scope
 
 from ..embeddings.sbert import SBert
-from ..utils.itertools import SubscriptableGenerator, sample
-from ..utils.miscellaneous import are_instances_of
+from ..utils.itertools import sample
+from ..utils.miscellaneous import are_instances
 from ..utils.text import extract_ngrams
 from .document import Document
-from .vocab import NGram, Vocab, VocabView
+from .vocab import NGram, Vocab, VocabBase, VocabView
 
 
 class CorpusBase(ABC):
     INDEXERS = str | int | slice | Tuple[str]
 
-    def __init__(self, output_dir: List[str] = [".", "output"]):
-        # Output directory
-        self._output_dir = Path(*output_dir).resolve()
-        self._corpus_dir = self._output_dir.joinpath("corpus")
-        self._corpus_dir.mkdir(parents=True, exist_ok=True)
+    def __init__(self, index: Iterable = None) -> None:
+        self._db = DB(Document, index)
 
     @property
     @abstractmethod
-    def index(self) -> List[str]:
+    def index(self) -> Iterable[int]:
         pass
 
     @property
-    @abstractmethod
-    def vocab(self) -> List[str]:
-        pass
+    def documents(self) -> Iterable[Document]:
+        return self._db.rows(self.index)
 
     @property
-    def documents(self) -> Generator[Document, None, None]:
-        for doc in self.index:
-            yield Document.load(self._corpus_dir.joinpath(f"{doc}.json"))
+    def vocab(self) -> VocabBase:
+        return self._vocab_view
 
     def __getitem__(self, indexer: INDEXERS) -> Document | Iterable[Any]:
-        if isinstance(indexer, str):
-            if not indexer in Document.FIELDS:
+        is_int, is_slice, is_str, is_iterable = (
+            isinstance(indexer, int),
+            isinstance(indexer, slice),
+            isinstance(indexer, str),
+            isinstance(indexer, Iterable) and are_instances(indexer, str))
+
+        if is_int:
+            return self._db.find_by_index(indexer)
+        elif is_slice:
+            return self._db.find_by_slice(indexer)
+        elif is_str or is_iterable:
+            if is_str:
+                indexer = [indexer]
+
+            if any(i for i in indexer if i not in Document.FIELDS):
                 raise KeyError(f"Key '{indexer}' not found.")
-            return SubscriptableGenerator(doc[indexer] for doc in self.documents)
-        elif isinstance(indexer, int):
-            return Document.load(
-                self._corpus_dir.joinpath(f"{self.index[indexer]}.json"))
-        elif isinstance(indexer, slice):
-            return SubscriptableGenerator(
-                Document.load(self._corpus_dir.joinpath(f"{id}.json"))
-                for id in self.index[indexer])
-        elif isinstance(indexer, tuple) and are_instances_of(indexer, str):
-            frame = {f"{key}": [] for key in indexer}
-            for doc in self.documents:
-                for key in indexer:
-                    frame[key].append(doc[key])
-            return pd.DataFrame(frame)
+
+            return self._db.select_columns(indexer)
         else:
             raise KeyError(f"Key '{indexer}' is not a valid indexer.")
 
     def __iter__(self) -> Generator:
-        for id in self.index:
-            yield Document.load(self._corpus_dir.joinpath(f"{id}.json"))
+        for document in self.documents:
+            yield document
 
     def __len__(self) -> int:
-        return len(self.index)
+        return len(self._db)
 
     def as_dataframe(self) -> pd.DataFrame:
         return pd.DataFrame.from_records(doc.asdict() for doc in self.documents)
@@ -73,112 +71,86 @@ class CorpusBase(ABC):
         return pd.Series(self[key])
 
     def __repr__(self) -> str:
-        return tabulate([
-            ["Number of documents", len(self)],
-            ["Location", self._corpus_dir]])
+        return tabulate([["Number of documents", len(self)]])
 
     def __contains__(self, doc: Document) -> bool:
-        return self._corpus_dir.joinpath(f"{Document.hash(doc)}.json").exists()
+        return next((it for it in self if it.id == doc.id), None) is not None
 
 
 class CorpusView(CorpusBase):
-    def __init__(self, index: Iterable, output_dir: List[str] = [".", "output"]) -> None:
-        super(CorpusView, self).__init__(output_dir)
-
-        self.__index = [*index]
+    def __init__(self, index: Iterable) -> None:
+        super(CorpusView, self).__init__(index)
+        self._index = index
 
         ngrams = set()
         for document in self:
             for ngram, _ in document.ngrams.items():
                 ngrams.add(ngram)
 
-        self.__vocab: VocabView = VocabView(
-            index=[NGram.hash(ngram) for ngram in ngrams],
-            output_dir=[p for p in str(
-                self._output_dir.relative_to(self._output_dir.parent)
-            ).split(os.sep)])
+        with session_scope() as s:
+            ngram_ids = s.query(NGram).filter(
+                NGram.ngram.in_(ngrams)
+            ).order_by(NGram.id).with_entities(NGram.id).all()
+
+        self._vocab_view: VocabView = VocabView(
+            index=[i[0] for i in ngram_ids])
 
     @property
-    def index(self) -> List[str]:
-        return self.__index
-
-    @property
-    def vocab(self) -> List[str]:
-        return self.__vocab
+    def index(self) -> Iterable[int]:
+        return self._index
 
 
 class Corpus(CorpusBase):
-    def __init__(self, output_dir: List[str] = [".", "output"]) -> None:
-        super(Corpus, self).__init__(output_dir)
+    def __init__(self) -> None:
+        super(Corpus, self).__init__()
 
-        self.__vocab: Vocab = Vocab(output_dir)
-        self.__vocab_view: VocabView = VocabView(
-            self.__vocab.index,
-            output_dir=[p for p in str(
-                self._output_dir.relative_to(self._output_dir.parent)
-            ).split(os.sep)])
+        self._vocab: Vocab = Vocab()
+        self._vocab_view: VocabView = VocabView(self._vocab.index)
 
     @property
-    def index(self) -> List[str]:
-        return [doc.stem for doc in sorted(self._corpus_dir.glob("*.json"))]
-
-    @property
-    def vocab(self) -> Vocab:
-        return self.__vocab_view
-
-    def generate_ngrams(self) -> None:
-        vocab: pd.DataFrame = extract_ngrams(self["content"])
-        vocab.to_csv(**self.__vocab_dict)
+    def index(self) -> Iterable[int]:
+        return self._db.index
 
     def sample(self, size: float | int, random_state: int = None) -> CorpusView:
-        return CorpusView(
-            output_dir=[p for p in str(
-                self._output_dir.relative_to(self._output_dir.parent)).split(os.sep)],
-            index=sample(self.index, size=size, random_state=random_state))
+        return CorpusView(sample(self.index, size=size, random_state=random_state))
 
     def calculate_document_embeddings(self):
         encoder: SBert = SBert()
 
         embeddings = encoder.predict(self["content"])
         for document in self:
-            document.embedding = embeddings.pop(0)
-            document.save(self._corpus_dir)
+            document.update({"embedding": embeddings.pop(0)})
 
         del encoder
 
     def build_vocab(self):
-        self.__vocab.clear_vocab()
+        self._vocab.clear_vocab()
 
-        for document in self:
-            ngrams = extract_ngrams(document.content)
-            document.ngrams = {}
-            for ngram in [*ngrams.keys()]:
-                document.ngrams[ngram] = ngrams[ngram]
-                del ngrams[ngram]
+        corpus_len = len(self)
+        for i, document in enumerate(self):
+            print(f"Processing document {i+1}/{corpus_len}", end="\r")
+            document.ngrams = extract_ngrams(document.content)
+            ngrams = []
+            for ngram, frequency in document.ngrams.items():
+                if (new_ngram := self._vocab[ngram]) != None:
+                    new_ngram.frequency += frequency
+                else:
+                    new_ngram = NGram(ngram, frequency)
 
-                try:
-                    new_ngram = self.__vocab[ngram]
-                    new_ngram.frequency += document.ngrams[ngram]
-                except:
-                    new_ngram = NGram(ngram, document.ngrams[ngram])
-                finally:
-                    self.__vocab.update_ngram(new_ngram)
-            document.save(self._corpus_dir)
+                ngrams.append(new_ngram)
 
-        self.calculate_vocab_embeddings()
+            document.update({"ngrams": document.ngrams})
+            self._vocab._db.bulk_update(ngrams)
 
     def calculate_vocab_embeddings(self):
         encoder: SBert = SBert()
 
-        embeddings = encoder.predict(ngram.ngram for ngram in self.__vocab)
-        for ngram in self.__vocab:
-            ngram.embedding = embeddings.pop(0)
-            self.__vocab.update_ngram(ngram)
+        embeddings = encoder.predict(ngram.ngram for ngram in self._vocab)
+        for ngram in self._vocab:
+            ngram.update({"embedding": embeddings.pop(0)})
 
         del encoder
 
     def clear_corpus(self):
-        for f in self._corpus_dir.glob("*.json"):
-            f.unlink()
-
-        self.__vocab.clear_vocab()
+        self._db.drop_table()
+        self._vocab.clear_vocab()
