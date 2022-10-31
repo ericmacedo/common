@@ -1,9 +1,9 @@
+import pickle
 from dataclasses import dataclass, field
 from multiprocessing import Process, Queue
 from typing import Iterable, List
-import pickle
 
-from ..utils.text import wrap_sentence
+from ..utils.text import split_sentences
 
 
 @dataclass
@@ -22,7 +22,7 @@ class SBert:
 
         embeddings = [
             transformer.encode(
-                wrap_sentence(document, n=500)
+                split_sentences(document)
             ).mean(axis=0).tolist() for document in corpus]
 
         del transformer
@@ -59,6 +59,7 @@ class SBert:
     @classmethod
     def clear_memory(cls):
         from gc import collect
+
         from torch.cuda import empty_cache, ipc_collect
 
         collect()
