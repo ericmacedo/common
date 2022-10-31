@@ -1,13 +1,11 @@
 import re
 import string
 from functools import lru_cache
-from typing import Any, Iterable, List, Dict
+from typing import Any, Dict, Iterable, List
 
-from nltk import pos_tag
+from nltk import FreqDist, everygrams, pos_tag, sent_tokenize
 from nltk.corpus import stopwords, wordnet
 from nltk.stem import WordNetLemmatizer
-
-from ..utils.itertools import chunks
 
 
 def extract_name(s: str) -> str:
@@ -97,19 +95,20 @@ def clean_text(s: str, **kwargs) -> str | Iterable[str]:
 
 
 def extract_ngrams(s: str, **kwargs) -> Dict:
-    # TODO make it multi core
     sort_by = kwargs.get("sort_by", "frequency")
     reverse = kwargs.get("reverse", True)
     ngrams = {}
 
     s = clean_text(s, as_string=False)
-    for token in s:
-        ngrams[token] = ngrams.get(token, 0) + 1
+    freq_dist = FreqDist(everygrams(s, 1, 3))
+    for ngram, frequency in freq_dist.items():
+        ngram = " ".join(ngram)
+        ngrams[ngram] = ngrams.get(ngram, 0) + frequency
 
     return dict(sorted(
-                ngrams.items(), reverse=reverse,
-                key=lambda item: item[0 if sort_by == "ngram" else 1]))
+        ngrams.items(), reverse=reverse,
+        key=lambda item: item[0 if sort_by == "ngram" else 1]))
 
 
-def wrap_sentence(s: str, n: int = None) -> List[str]:
-    return [" ".join(chunk) for chunk in chunks(s.split(), n)]
+def split_sentences(s: str) -> List[str]:
+    return sent_tokenize(s)
