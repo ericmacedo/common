@@ -1,13 +1,15 @@
+from __future__ import annotations
+
 from itertools import islice, tee
 from typing import Any, Generator, Iterable, List
 from numpy.random import RandomState
 
 
 class SubscriptableGenerator:
-    def __init__(self, it: Iterable[Any]):
+    def __init__(self, it: Iterable[Any], lenght: int = None):
         self.__iterable = iter(it)
 
-        self.__len = sum(1 for _ in self.__copy())
+        self.__len = lenght
 
     def __iter__(self) -> Generator:
         for i in self.__iterable:
@@ -15,17 +17,17 @@ class SubscriptableGenerator:
 
     def __getitem__(self, indexer: int | slice) -> Any | Iterable[Any]:
         if isinstance(indexer, int):
-            if indexer >= self.__len:
+            if indexer >= len(self):
                 raise IndexError(f"Generator index {indexer} is out of range")
 
-            index = (self.__len + indexer) % self.__len
-            return next(islice(self.__copy(), index, self.__len))
+            index = (len(self) + indexer) % len(self)
+            return next(islice(self.__copy(), index, len(self)))
         elif isinstance(indexer, slice):
             start, stop = None, None
             if indexer.start:
-                start = (self.__len + indexer.start) % self.__len
+                start = (len(self) + indexer.start) % len(self)
             if indexer.stop:
-                stop = (self.__len + indexer.stop) % self.__len
+                stop = (len(self) + indexer.stop) % len(self)
 
             return iter(
                 it for index, it in enumerate(self.__copy())
@@ -34,6 +36,8 @@ class SubscriptableGenerator:
             raise KeyError(f"Key '{indexer}' is not a valid indexer.")
 
     def __len__(self) -> int:
+        if not self.__len:
+            self.__len = sum(1 for _ in self.__copy())
         return self.__len
 
     def __copy(self) -> Generator:
