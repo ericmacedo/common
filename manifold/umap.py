@@ -1,6 +1,6 @@
 from typing import Iterable
 
-from common.manifold import Manifold
+from ..manifold import Manifold
 
 import umap
 
