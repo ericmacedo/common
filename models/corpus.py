@@ -123,12 +123,17 @@ class Corpus(CorpusBase):
 
         del encoder
 
-    def build_vocab(self):
-        self._vocab.clear_vocab()
+    def build_vocab(self, resume: bool = False):
+        if not resume:
+            self._vocab.clear_vocab()
 
         corpus_len = len(self)
         for i, document in enumerate(self):
             print(f"Processing document {i+1}/{corpus_len}", end="\r")
+
+            if resume and document.ngrams:
+                continue
+
             document.ngrams = extract_ngrams(document.content)
             ngrams = []
             for ngram, frequency in document.ngrams.items():
