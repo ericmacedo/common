@@ -7,13 +7,13 @@ import pandas as pd
 from tabulate import tabulate
 
 from ..helpers.db import DB
-from ..models.ngram import NGram
-from ..utils.itertools import SubscriptableGenerator
+from ..models.ngram import NGram, NGramEmbedding
 
 
 class VocabBase(ABC):
     def __init__(self, index: Iterable = None):
         self._db = DB(NGram, index)
+        self._db_embeddings = DB(NGramEmbedding, index)
 
     @property
     @abstractmethod
@@ -71,4 +71,8 @@ class Vocab(VocabBase):
         return self._db.index
 
     def clear_vocab(self):
+        self._db_embeddings.drop_table()
         self._db.drop_table()
+
+        self._db.create_table()
+        self._db_embeddings.create_table()

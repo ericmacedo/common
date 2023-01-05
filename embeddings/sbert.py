@@ -1,7 +1,8 @@
 import pickle
 from dataclasses import dataclass, field
-from multiprocessing import Process, Queue
-from typing import Iterable, List
+from typing import Generator, Iterable
+
+from sentence_transformers import SentenceTransformer
 
 from ..utils.text import split_sentences
 
@@ -15,42 +16,27 @@ class SBert:
         self.model_name = model_name
         self.embeddings = []
 
-    def _train(self, queue: Queue, corpus: Iterable[str]):
-        from sentence_transformers import SentenceTransformer
-
+    def encode_documents(self, corpus: Iterable[str]) -> Generator[Iterable[float], None, None]:
         transformer = SentenceTransformer(self.model_name)
 
-        embeddings = [
-            transformer.encode(
-                split_sentences(document)
-            ).mean(axis=0).tolist() for document in corpus]
+        size = len(corpus)
+        for index, document in enumerate(corpus):
+            print(f"Processing embedding for document {index + 1}/{size}",
+                  end="\r")
+            yield [*transformer.encode(split_sentences(document)).mean(axis=0)]
 
         del transformer
         SBert.clear_memory()
 
-        queue.put(embeddings)
+    def encode_ngrams(self, ngrams: Iterable[str]) -> Generator[Iterable[float], None, None]:
+        transformer = SentenceTransformer(self.model_name)
 
-    def train(self, corpus: Iterable[str]) -> list:
-        queue = Queue()
-        p = Process(
-            target=self._train,
-            kwargs={"queue": queue, "corpus": corpus})
-        p.start()
-        self.embeddings = queue.get()
-        p.join()
+        embeddings = transformer.encode(ngrams).tolist()
+        while embeddings:
+            yield embeddings.pop(0)
 
-        return self.embeddings
-
-    def predict(self, data: Iterable[str]) -> List[List[float]]:
-        queue = Queue()
-        p = Process(
-            target=self._train,
-            kwargs={"queue": queue, "corpus": data})
-        p.start()
-        embeddings = queue.get()
-        p.join()
-
-        return embeddings
+        del transformer
+        SBert.clear_memory()
 
     @classmethod
     def load(cls, path: str):

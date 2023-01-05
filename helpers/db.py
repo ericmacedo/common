@@ -3,13 +3,13 @@ from __future__ import annotations
 from collections import namedtuple
 from typing import Iterable
 
-from numpy import mat
-
-from ..mixins.orm import MixinORM
-from ..utils.itertools import SubscriptableGenerator
 from sqlalchemy import desc, func, select
+from sqlalchemy.orm import close_all_sessions
+
 
 from ..helpers.orm import Engine, Session
+from ..mixins.orm import MixinORM
+from ..utils.itertools import SubscriptableGenerator
 
 
 class DB:
@@ -31,6 +31,7 @@ class DB:
         try:
             yield session
             session.commit()
+            session.expunge_all()
         except Exception:
             session.rollback()
             raise
@@ -68,8 +69,11 @@ class DB:
         return SubscriptableGenerator((row[0] for row in query), lenght)
 
     def drop_table(self):
-        self.__session.close()
+        close_all_sessions()
         self.__model.__table__.drop(bind=Engine, checkfirst=True)
+
+    def create_table(self):
+        close_all_sessions()
         self.__model.__table__.create(bind=Engine, checkfirst=True)
 
     def filter_by(self, **kwargs):
@@ -94,7 +98,9 @@ class DB:
 
         Row = namedtuple("Row", [*columns])
         lenght = len(self)
-        return SubscriptableGenerator((Row(*row) for row in query), lenght)
+        return SubscriptableGenerator(
+            (Row(*row) if len(row) > 1 else row[0] for row in query),
+            lenght)
 
     def bulk_update(self, items: Iterable[MixinORM]):
         old_items = [

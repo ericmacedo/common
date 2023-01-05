@@ -8,6 +8,13 @@ from nltk.corpus import stopwords, wordnet
 from nltk.stem import WordNetLemmatizer
 
 
+def is_stop_word(s: str, stop_words: Iterable[str] = []) -> bool:
+    stop_words = [*set(stopwords.words("english"))
+                  .union(stop_words)
+                  .union(["'s", "'ll", "n't", "'d", "'ve", "'m", "'re", "'"])]
+    return s in stop_words
+
+
 def extract_name(s: str) -> str:
     s = re.sub(
         r"(?P<last>([a-z]+\s)?[A-Z][a-z]+)\,\s?(?P<first>([A-Z]([a-z]+|\.?)\ ?)+)",
@@ -29,16 +36,15 @@ def strip_tags(s: str) -> str:
     return re.sub(r"<[^<]+?>", r"", s)
 
 
-@lru_cache(maxsize=None)
-def get_wordnet_pos(word: str) -> Any:
-    tag = pos_tag([word])[0][1][0].upper()
+def get_wordnet_pos(sentence: List[str]) -> Any:
     tag_dict = {
         "J": wordnet.ADJ,
         "N": wordnet.NOUN,
         "V": wordnet.VERB,
         "R": wordnet.ADV}
 
-    return tag_dict.get(tag, wordnet.NOUN)
+    for index, tag in enumerate(sentence):
+        yield sentence[index], tag_dict.get(tag[1][0].upper(), wordnet.NOUN)
 
 
 def clean_text(s: str, **kwargs) -> str | Iterable[str]:
@@ -53,10 +59,7 @@ def clean_text(s: str, **kwargs) -> str | Iterable[str]:
     __lemmatize = kwargs.get("lemmatize", True)
     __as_string = kwargs.get("as_string", True)
 
-    stop_words = [*set(stopwords.words("english"))
-                  .union(kwargs.get("stop_words", []))
-                  .union(["'s", "'ll", "n't", "'d", "'ve", "'m", "'re", "'"])]
-
+    stop_words = kwargs.get("stop_words", [])
     punctuation = r"[{0}]".format(re.sub(r"[-']", "", string.punctuation))
 
     # Lowercase
@@ -66,7 +69,22 @@ def clean_text(s: str, **kwargs) -> str | Iterable[str]:
     s = strip_tags(s) if __strip_tags else s
 
     # Symbols
-    s = re.sub(r'[^\x00-\xb7f\xc0-\xff]', r' ', s) if __symbols else s
+    s = s.encode("cp869", errors='ignore').decode("cp869")
+    s = re.sub(
+        r"["
+        r"\x00-\x1f"
+        r"\x7f-\xa3"
+        r"\xab-\xb4"
+        r"\xb9-\xbc"
+        r"\xbf-\xc5"
+        r"\xc8-\xce"
+        r"\xd9-\xdc"
+        r"\xdf"
+        r"\xf7-\xf9"
+        r"\xfe-\xff"
+        r"]",
+        r' ', s
+    ) if __symbols else s
 
     # Links
     s = re.sub(r'https?:\/\/.*[\r\n]*', '', s) if __links else s
@@ -85,11 +103,14 @@ def clean_text(s: str, **kwargs) -> str | Iterable[str]:
 
     tokens = []
     lemmatizer = WordNetLemmatizer()
-    for token in s:
-        if __stop_words and not token in stop_words:
-            tokens.append(lemmatizer.lemmatize(
-                token, get_wordnet_pos(token)
-            ) if __lemmatize else token)
+    for token, pos in get_wordnet_pos(s):
+        if is_stop_word(token, stop_words):
+            continue
+
+        token = lemmatizer.lemmatize(token, pos) if __lemmatize else token
+
+        if not is_stop_word(token, stop_words):
+            tokens.append(token)
 
     return " ".join(tokens).strip() if __as_string else tokens
 

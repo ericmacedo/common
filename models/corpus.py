@@ -4,15 +4,15 @@ from typing import Any, Generator, Iterable, Tuple
 import pandas as pd
 from pyparsing import abstractmethod
 from tabulate import tabulate
-from ..helpers.db import DB
-
-from ..helpers.orm import session_scope
 
 from ..embeddings.sbert import SBert
+from ..helpers.db import DB
+from ..helpers.orm import session_scope
+from ..utils.concurrency import batch_processing
 from ..utils.itertools import sample
 from ..utils.miscellaneous import are_instances
-from ..utils.text import extract_ngrams
-from .document import Document
+from .document import Document, DocumentEmbedding
+from .ngram import NGramEmbedding
 from .vocab import NGram, Vocab, VocabBase, VocabView
 
 
@@ -21,6 +21,7 @@ class CorpusBase(ABC):
 
     def __init__(self, index: Iterable = None) -> None:
         self._db = DB(Document, index)
+        self._db_embeddings = DB(DocumentEmbedding, index)
 
     @property
     @abstractmethod
@@ -117,13 +118,16 @@ class Corpus(CorpusBase):
     def calculate_document_embeddings(self):
         encoder: SBert = SBert()
 
-        embeddings = encoder.predict(self["content"])
-        for document in self:
-            document.update({"embedding": embeddings.pop(0)})
+        for doc_id, embedding in zip(self["id"],
+                                     encoder.encode_documents(self["content"])):
+            DocumentEmbedding(document_id=doc_id, embedding=embedding).save()
 
         del encoder
 
     def build_vocab(self, resume: bool = False):
+
+        encoder: SBert = SBert()
+
         if not resume:
             self._vocab.clear_vocab()
 
@@ -134,7 +138,6 @@ class Corpus(CorpusBase):
             if resume and document.ngrams:
                 continue
 
-            document.ngrams = extract_ngrams(document.content)
             ngrams = []
             for ngram, frequency in document.ngrams.items():
                 if (new_ngram := self._vocab[ngram]) != None:
@@ -142,20 +145,34 @@ class Corpus(CorpusBase):
                 else:
                     new_ngram = NGram(ngram, frequency)
 
+                new_ngram.occurence += 1
                 ngrams.append(new_ngram)
+
+            # calculates embedding for new ngrams
+            ngrams_to_calculate_embedding = [
+                index for index, ngram in enumerate(ngrams)
+                if not getattr(ngram, "id", None)]
+            ngrams_embeddings = zip(
+                ngrams_to_calculate_embedding,
+                [*encoder.encode_ngrams(
+                    [ngrams[i].ngram for i in ngrams_to_calculate_embedding])])
 
             document.update({"ngrams": document.ngrams})
             self._vocab._db.bulk_update(ngrams)
+            self._vocab._db_embeddings.bulk_update([
+                NGramEmbedding(ngram_id=ngrams[index].id, embedding=embedding)
+                for index, embedding in ngrams_embeddings])
 
-    def calculate_vocab_embeddings(self):
-        encoder: SBert = SBert()
-
-        embeddings = encoder.predict(ngram.ngram for ngram in self._vocab)
-        for ngram in self._vocab:
-            ngram.update({"embedding": embeddings.pop(0)})
+            ngrams.clear()
+            del ngrams, ngrams_to_calculate_embedding, ngrams_embeddings
 
         del encoder
 
     def clear_corpus(self):
+        self._db_embeddings.drop_table()
         self._db.drop_table()
+
+        self._db.create_table()
+        self._db_embeddings.create_table()
+
         self._vocab.clear_vocab()
