@@ -6,7 +6,6 @@ from typing import Iterable
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import close_all_sessions
 
-
 from ..helpers.orm import Engine, Session
 from ..mixins.orm import MixinORM
 from ..utils.itertools import SubscriptableGenerator
@@ -18,9 +17,15 @@ class DB:
             raise ValueError(
                 f"Class {orm_model.__class__} is not a subclass of MixinORM")
 
-        self.__model = orm_model
-        self.__index = index
         self.__session = Session()
+        self.__model = orm_model
+
+        if index == None or len(self.index) == len(index):
+            self._index = None
+        elif len(index) == 0:
+            self._index = []
+        else:
+            self._index = index
 
     @property
     def session(self):
@@ -42,14 +47,18 @@ class DB:
         ).scalar()
 
     def __len__(self) -> int:
-        statement = select(self.__model.id.in_(
-            self.__index
-        ) if self.__index else self.__model.id)
-        return self.__count(statement)
+        return len(self._index) if (
+            self.is_custom_index()
+        ) else self.__count(select(self.__model.id))
 
     @property
     def index(self) -> Iterable:
-        statement = select(self.__model.id)
+        if self.is_custom_index():
+            return SubscriptableGenerator(
+                (i for i in self._index),
+                len(self._index))
+
+        statement = self.__build_statement(select=self.__model.id)
 
         query = next(self.session).execute(
             statement.order_by(self.__model.id)
@@ -59,7 +68,9 @@ class DB:
         return SubscriptableGenerator((row[0] for row in query), lenght)
 
     def rows(self, index: Iterable) -> Iterable:
-        statement = select(self.__model).filter(self.__model.id.in_(index))
+        statement = self.__build_statement(
+            select=self.__model,
+            filter=self.__model.id.in_(index))
 
         query = next(self.session).execute(
             statement.order_by(self.__model.id)
@@ -82,15 +93,18 @@ class DB:
                 self.__model.__tablename__, [*kwargs]))
 
         query = next(self.session).execute(
-            select(self.__model)
-            .filter_by(**kwargs))
+            self.__build_statement(
+                select=self.__model,
+                filter_by=kwargs)
+        )
         return query
 
     def select_columns(self, columns: Iterable[str]) -> Iterable:
         if isinstance(columns, str):
             columns = [columns]
 
-        statement = select([self.__model[column] for column in columns])
+        statement = self.__build_statement(
+            select=[self.__model[column] for column in columns])
 
         query = next(self.session).execute(
             statement.order_by(self.__model["id"])
@@ -117,20 +131,22 @@ class DB:
         session.commit()
 
     def find(self, id: int) -> MixinORM:
-        return next(self.session).get(self.__model, id)
+        return None if (
+            self._index and id not in self._index
+        ) else next(self.session).get(self.__model, id)
 
     def find_by_index(self, index: int) -> MixinORM:
-        match = next(self.session).execute(
-            select(self.__model)
-            .order_by(
-                desc(self.__model.id) if index < 0 else self.__model.id
-            ).offset(abs(index))
-            .limit(1)
-        ).first()
+        statement = self.__build_statement(
+            select=self.__model,
+            order_by=desc(self.__model.id) if index < 0 else self.__model.id,
+            offset=abs(index),
+            limit=1
+        )
+        match = next(self.session).execute(statement).first()
         return match[0] if match else None
 
     def find_by_slice(self, indexer: slice) -> Iterable[MixinORM]:
-        statement0 = select(self.__model)
+        statement0 = self.__build_statement(select=self.__model)
         statement = statement0.order_by(self.__model.id)
 
         if indexer.start:
@@ -147,8 +163,30 @@ class DB:
 
     def find_by_match(self, **kwargs) -> MixinORM:
         match = next(self.session).execute(
-            select(self.__model)
-            .filter_by(**kwargs)
-            .limit(1)
+            self.__build_statement(
+                select=self.__model,
+                filter_by=kwargs,
+                limit=1)
         ).first()
         return match[0] if match else None
+
+    def __build_statement(self, **kwargs):
+        if "select" not in kwargs:
+            return None
+
+        statement = select(kwargs.pop("select"))
+        statement = statement.where(
+            self.__model.id.in_([*self.index])
+        ) if self.is_custom_index() else statement
+
+        for operation, stat in kwargs.items():
+            statement = getattr(statement, operation)
+            if isinstance(stat, dict):
+                statement = statement(**stat)
+            else:
+                statement = statement(stat)
+
+        return statement
+
+    def is_custom_index(self):
+        return hasattr(self, "_index") and self._index != None

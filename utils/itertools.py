@@ -58,6 +58,9 @@ def sample(it: Iterable[Any], size: int | float, random_state: int = None) -> It
     if type(size) not in [int, float]:
         raise TypeError("Parameter 'size' must be float or int")
 
+    if size == 0:
+        return []
+
     it, it2 = tee(it)
 
     it_len = sum(1 for _ in it2)
