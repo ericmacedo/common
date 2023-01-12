@@ -1,13 +1,12 @@
 from __future__ import annotations
 from abc import abstractmethod
+import hashlib
 
 from typing import Any, Dict, Iterable
 
 from sqlalchemy import update
-from sqlalchemy.exc import DatabaseError, OperationalError, ResourceClosedError
 
 from ..helpers.orm import session_scope
-import time
 
 
 class MixinORM:
@@ -51,3 +50,7 @@ class MixinORM:
         if isinstance(index, str) and index in self.FIELDS:
             return getattr(self, index)
         return None
+
+    @classmethod
+    def hash(cls, data: str) -> str:
+        return hashlib.md5(data.encode("utf-8")).hexdigest()
