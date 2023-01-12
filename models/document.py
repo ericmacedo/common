@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+import hashlib
 from typing import ClassVar, Dict, List
 
 from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String
@@ -19,6 +20,10 @@ def empty_embedding():
     return None
 
 
+def hash_id(context) -> str:
+    return MixinORM.hash(context.current_parameters["doi"])
+
+
 @MapperRegistry.mapped
 @dataclass
 class DocumentEmbedding(MixinORM):
@@ -26,9 +31,11 @@ class DocumentEmbedding(MixinORM):
     __sa_dataclass_metadata_key__ = "sa"
 
     id: Mapped[int] = field(init=False,
-                            metadata={"sa": Column(Integer, primary_key=True)})
-    document_id: Mapped[int] = field(
-        metadata={"sa": Column(Integer,
+                            metadata={"sa": Column(Integer,
+                                                   primary_key=True,
+                                                   index=True)})
+    document_id: Mapped[str] = field(
+        metadata={"sa": Column(String(32),
                                ForeignKey(f"{DOCUMENT_TABLE}.id"),
                                unique=True)})
     document: Mapped["Document"] = field(
@@ -47,8 +54,11 @@ class Document(MixinORM):
     __tablename__ = DOCUMENT_TABLE
     __sa_dataclass_metadata_key__ = "sa"
 
-    id: Mapped[int] = field(init=False,
-                            metadata={"sa": Column(Integer, primary_key=True)})
+    id: Mapped[str] = field(init=False,
+                            metadata={"sa": Column(String(32),
+                                                   primary_key=True,
+                                                   index=True,
+                                                   default=hash_id)})
     doi: str = field(metadata={"sa": Column(
         String, nullable=False, unique=True)})
     url: str = field(metadata={"sa": Column(String, nullable=False)})
