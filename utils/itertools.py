@@ -40,6 +40,13 @@ class SubscriptableGenerator:
             self.__len = sum(1 for _ in self.__copy())
         return self.__len
 
+    def __contains__(self, item: Any) -> bool:
+        for it in self.__copy():
+            if it == item:
+                return True
+        else:
+            return False
+
     def __copy(self) -> Generator:
         self.__iterable, it = tee(self.__iterable)
         return it
