@@ -2,16 +2,20 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from typing import ClassVar, Dict, List
-from ..mixins.orm import MixinORM
-from ..helpers.orm import Base, Engine, MapperRegistry
 
 from sqlalchemy import Column, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, relationship
+
+from ..helpers.db import MapperRegistry, MixinORM
 from .types.embedding import Embedding
 
 
 def empty_embedding():
     return None
+
+
+def hash_id(context) -> str:
+    return MixinORM.hash(context.current_parameters["ngram"])
 
 
 NGRAM_TABLE = "ngrams"
@@ -25,8 +29,8 @@ class NGramEmbedding(MixinORM):
 
     id: Mapped[int] = field(init=False,
                             metadata={"sa": Column(Integer, primary_key=True)})
-    ngram_id: Mapped[int] = field(
-        metadata={"sa": Column(Integer,
+    ngram_id: Mapped[str] = field(
+        metadata={"sa": Column(String(32),
                                ForeignKey(f"{NGRAM_TABLE}.id",
                                           ondelete="CASCADE"),
                                unique=True)})
@@ -46,8 +50,10 @@ class NGram(MixinORM):
     __tablename__ = NGRAM_TABLE
     __sa_dataclass_metadata_key__ = "sa"
 
-    id: Mapped[int] = field(init=False,
-                            metadata={"sa": Column(Integer, primary_key=True)})
+    id: Mapped[str] = field(init=False,
+                            metadata={"sa": Column(String(32),
+                                                   primary_key=True,
+                                                   default=hash_id)})
     ngram: str = field(metadata={"sa": Column(
         String, nullable=False, unique=True)})
     embedding: Mapped["NGramEmbedding"] = field(
@@ -74,4 +80,4 @@ class NGram(MixinORM):
         return obj
 
 
-Base.metadata.create_all(Engine)
+# Base.metadata.create_all(Engine)

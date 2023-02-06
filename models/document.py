@@ -2,14 +2,12 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
-import hashlib
 from typing import ClassVar, Dict, List
 
 from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, relationship
 
-from ..helpers.orm import Base, Engine, MapperRegistry
-from ..mixins.orm import MixinORM
+from ..helpers.db import MapperRegistry, MixinORM
 from .types.dictionary import Dictionary
 from .types.embedding import Embedding
 
@@ -34,8 +32,8 @@ class DocumentEmbedding(MixinORM):
                             metadata={"sa": Column(Integer,
                                                    primary_key=True,
                                                    index=True)})
-    document_id: Mapped[str] = field(
-        metadata={"sa": Column(String(32),
+    document_id: Mapped[int] = field(
+        metadata={"sa": Column(Integer,
                                ForeignKey(f"{DOCUMENT_TABLE}.id"),
                                unique=True)})
     document: Mapped["Document"] = field(
@@ -54,11 +52,8 @@ class Document(MixinORM):
     __tablename__ = DOCUMENT_TABLE
     __sa_dataclass_metadata_key__ = "sa"
 
-    id: Mapped[str] = field(init=False,
-                            metadata={"sa": Column(String(32),
-                                                   primary_key=True,
-                                                   index=True,
-                                                   default=hash_id)})
+    id: Mapped[int] = field(init=False,
+                            metadata={"sa": Column(Integer, primary_key=True)})
     doi: str = field(metadata={"sa": Column(
         String, nullable=False, unique=True)})
     url: str = field(metadata={"sa": Column(String, nullable=False)})
@@ -104,4 +99,4 @@ class Document(MixinORM):
         return obj
 
 
-Base.metadata.create_all(Engine)
+# Base.metadata.create_all(Engine)
