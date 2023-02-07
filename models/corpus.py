@@ -36,7 +36,6 @@ def process_ngrams(data: Any, **kwargs):
             except OperationalError:
                 continue
 
-    del db_driver
     return value
 
 
@@ -44,6 +43,8 @@ class CorpusBase(ABC):
     INDEXERS = str | int | slice | Tuple[str]
 
     def __init__(self, index: Iterable = None, **kwargs) -> None:
+        DriverDB(**kwargs).create_all()
+
         self._db = DB(Document, index, **kwargs)
         self._db_embeddings = DB(DocumentEmbedding, index, **kwargs)
         self._db_settings = Settings
@@ -148,18 +149,19 @@ class Corpus(CorpusBase):
 
         for doc_id, embedding in zip(self["id"],
                                      encoder.encode_documents(self["content"])):
-            DocumentEmbedding(document_id=doc_id, embedding=embedding).save()
+            DocumentEmbedding(document_id=doc_id,
+                              embedding=embedding).save(**self._kwargs)
 
         del encoder
 
     def build_vocab(self, resume: bool = False):
         if not resume:
             self.clear_vocab()
-            self._db_settings.set("last_document_processed", 0)
+            self._db_settings.set("last_document_processed", 0, **self._kwargs)
 
         corpus_len = len(self)
         last_document_processed = self._db_settings.get(
-            "last_document_processed").value
+            "last_document_processed", **self._kwargs).value
         for index, document in enumerate(self, 1):
             print(f"Processing document {index}/{corpus_len}", end="\r")
 
@@ -173,7 +175,8 @@ class Corpus(CorpusBase):
 
             self._vocab._db.bulk_update(ngrams)
             ngrams.clear()
-            self._db_settings.set("last_document_processed", index)
+            self._db_settings.set(
+                "last_document_processed", index, **self._kwargs)
 
         self._vocab._db.delete_where(NGram.occurence == 1)
 
