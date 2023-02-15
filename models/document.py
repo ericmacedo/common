@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+import json
 from typing import ClassVar, Dict, List
 
 from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, relationship
+
+from common.utils.json import default_json_parser
 
 from ..helpers.db import MapperRegistry, MixinORM
 from .types.dictionary import Dictionary
@@ -94,9 +97,11 @@ class Document(MixinORM):
         return document and document.id == self.id
 
     def as_dict(self) -> Dict:
-        obj = asdict(self)
+        ignore = ["embedding"]
+        fields = [field for field in self.FIELDS if field not in ignore]
+        obj = {field: getattr(self, field) for field in fields}
         obj["embedding"] = self.embedding.embedding if self.embedding else None
+        obj["date"] = int(obj["date"].year)
         return obj
-
 
 # Base.metadata.create_all(Engine)

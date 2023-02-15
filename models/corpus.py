@@ -105,6 +105,9 @@ class CorpusBase(ABC):
     def __contains__(self, doc: Document) -> bool:
         return next((it for it in self if it.id == doc.id), None) is not None
 
+    def __del__(self):
+        del self._db, self._db_embeddings
+
 
 class CorpusView(CorpusBase):
     def __init__(self, index: Iterable, **kwargs) -> None:

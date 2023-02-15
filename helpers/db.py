@@ -5,7 +5,7 @@ from abc import abstractmethod
 from collections import namedtuple
 from contextlib import contextmanager
 from os import getenv
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, List
 
 from sqlalchemy import create_engine, delete, desc, func, select, update, and_
 from sqlalchemy.orm import close_all_sessions, registry, sessionmaker
@@ -166,6 +166,10 @@ class DB:
             self.is_custom_index()
         ) else self.__count(select(self.__model.id))
 
+    def __del__(self):
+        self.__session.close()
+        del self.__driver
+
     @property
     def index(self) -> Iterable:
         if self.is_custom_index():
@@ -181,6 +185,10 @@ class DB:
 
         lenght = self.__count(statement)
         return SubscriptableGenerator((row[0] for row in query), lenght)
+
+    @index.setter
+    def index(self, index: Iterable):
+        self._index = index
 
     def rows(self) -> Iterable:
         statement = self.__build_statement(select=self.__model)
@@ -199,6 +207,24 @@ class DB:
     def create_table(self):
         close_all_sessions()
         self.__model.__table__.create(bind=self.__engine, checkfirst=True)
+
+    def min(self, column: str) -> Any:
+        if column not in self.__model.FIELDS:
+            raise Exception("Table {0} doesn't have a {1} field".format(
+                self.__model.__tablename__, column))
+
+        return next(self.session).execute(
+            func.min(self.__model[column])
+        ).scalar()
+
+    def max(self, column: str) -> Any:
+        if column not in self.__model.FIELDS:
+            raise Exception("Table {0} doesn't have a {1} field".format(
+                self.__model.__tablename__, column))
+
+        return next(self.session).execute(
+            func.max(self.__model[column])
+        ).scalar()
 
     def filter_by(self, **kwargs):
         if any([1 for key in kwargs.keys() if key not in self.__model.FIELDS]):
@@ -258,6 +284,30 @@ class DB:
                 .where(self.__model.id.in_(id)))
         else:
             return None
+
+    def find_where(self,
+                   filters: List = [],
+                   sort: List = [],
+                   page: int = None,
+                   rows_per_page: int = None) -> Iterable[MixinORM]:
+
+        statement = select(self.__model)
+
+        if filters:
+            statement = statement.where(and_(*filters))
+
+        if sort:
+            statement = statement.order_by(*sort)
+
+        if page != None and rows_per_page != None:
+            statement = statement.offset(
+                page * rows_per_page).limit(rows_per_page)
+
+        session = next(self.session)
+        query = session.execute(statement)
+
+        lenght = self.__count(statement)
+        return SubscriptableGenerator((row[0] for row in query), lenght)
 
     def find_by_index(self, index: int) -> MixinORM:
         statement = self.__build_statement(
