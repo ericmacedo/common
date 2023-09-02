@@ -6,8 +6,10 @@ from typing import ClassVar, Dict, List
 from sqlalchemy import Column, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, relationship
 
-from ..helpers.db import MapperRegistry, MixinORM
-from .types.embedding import Embedding
+from common.models.types.embedding import Embedding
+
+from ..database import MapperRegistry
+from ..mixins.db import MixinORM
 
 
 def empty_embedding():

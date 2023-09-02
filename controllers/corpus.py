@@ -1,21 +1,23 @@
 from abc import ABC
-from typing import Any, Generator, Iterable, Tuple
+from datetime import datetime
+from typing import Any, Generator, Iterable, List, Optional, Tuple
 
 import pandas as pd
+from pydantic import BaseModel, Field
 from pyparsing import abstractmethod
+from sqlalchemy import desc
 from sqlalchemy.exc import OperationalError
 from tabulate import tabulate
 
-from common.helpers.db import DriverDB
+from common.database.connector import DriverDB
 from common.models.settings import Settings
 
+from ..database.service import ServiceDB
 from ..embeddings.sbert import SBert
-from ..helpers.db import DB
+from ..models.document import Document, DocumentEmbedding
 from ..utils.concurrency import batch_processing
-from ..utils.itertools import sample
 from ..utils.miscellaneous import are_instances
-from .document import Document, DocumentEmbedding
-from .vocab import NGram, Vocab, VocabBase, VocabView
+from .vocab import NGram, Vocab
 
 
 def process_ngrams(data: Any, **kwargs):
@@ -39,14 +41,44 @@ def process_ngrams(data: Any, **kwargs):
     return value
 
 
-class CorpusBase(ABC):
+class CorpusBaseQuery(BaseModel):
+    db_name: str
+
+
+class FilterBase(BaseModel):
+    doi_filter: Optional[str]
+    url_filter: Optional[str]
+    title_filter: Optional[str]
+    abstract_filter: Optional[str]
+    citatitons_filter: Optional[str]
+    date_filter: Optional[str]
+
+
+class SortBase(BaseModel):
+    doi_sort: Optional[int]
+    url_sort: Optional[int]
+    title_sort: Optional[int]
+    abstract_sort: Optional[int]
+    citations_sort: Optional[int]
+    date_sort: Optional[int]
+
+
+class CorpusQuery(CorpusBaseQuery, FilterBase, SortBase):
+    page: Optional[int] = Field(None, description="Page number to query")
+    page_size: Optional[int] = Field(
+        None, description="Number of rows per page")
+    metadata: Optional[bool] = Field(
+        False, description="Whether to return only metadata")
+
+
+class CorpusControllerBase(ABC):
     INDEXERS = str | int | slice | Tuple[str]
 
-    def __init__(self, index: Iterable = None, **kwargs) -> None:
+    def __init__(self, **kwargs) -> None:
         DriverDB(**kwargs).create_all()
 
-        self._db = DB(Document, index, **kwargs)
-        self._db_embeddings = DB(DocumentEmbedding, index, **kwargs)
+        self._db = ServiceDB(Document, **kwargs)
+        self._db_embeddings = ServiceDB(DocumentEmbedding, **kwargs)
         self._db_settings = Settings
 
         self._kwargs = kwargs
@@ -59,10 +91,6 @@ class CorpusBase(ABC):
     @property
     def documents(self) -> Iterable[Document]:
         return self._db.rows()
-
-    @property
-    def vocab(self) -> VocabBase:
-        return self._vocab_view
 
     def __getitem__(self, indexer: INDEXERS) -> Document | Iterable[Any]:
         is_int, is_slice, is_str, is_iterable = (
@@ -90,8 +118,27 @@ class CorpusBase(ABC):
         for document in self.documents:
             yield document
 
-    def __len__(self) -> int:
-        return len(self._db)
+    def len(self, query: CorpusBaseQuery = None) -> int:
+        return self._db.len(self.__get_filter_params(query)
+                            if query else query)
+
+    def min(self, column: str) -> int:
+        min = self._db.min(column)
+        return int(min.year if isinstance(min, datetime) else min)
+
+    def max(self, column: str) -> int:
+        max = self._db.max(column)
+        return int(max.year if isinstance(max, datetime) else max)
+
+    def find(self, doc_id: int) -> Document:
+        return self._db.find(doc_id)
+
+    def find_where(self, query: CorpusQuery) -> Iterable[Document]:
+        return self._db.find_where(
+            page=query.page,
+            page_size=query.page_size,
+            filters=self.__get_filter_params(query),
+            sort=self.__get_sort_params(query))
 
     def as_dataframe(self) -> pd.DataFrame:
         return pd.DataFrame.from_records(doc.asdict() for doc in self.documents)
@@ -108,44 +155,54 @@ class CorpusBase(ABC):
     def __del__(self):
         del self._db, self._db_embeddings
 
+    def __get_filter_params(self, query: FilterBase) -> List:
+        params = []
 
-class CorpusView(CorpusBase):
-    def __init__(self, index: Iterable, **kwargs) -> None:
-        super(CorpusView, self).__init__(index=index, **kwargs)
-        self._index = index
+        if (doi := getattr(query, "doi_filter", None)):
+            params.append(Document.doi.contains(doi))
 
-        if self._db.is_custom_index():
-            ngrams = set()
-            for document_ngrams in self["ngrams"]:
-                ngrams.update({*document_ngrams.keys()})
+        if (url := getattr(query, "url_filter", None)):
+            params.append(Document.url.contains(url))
 
-            ngram_ids = [NGram.hash(ngram) for ngram in ngrams]
+        if (title := getattr(query, "title_filter", None)):
+            params.append(Document.title.contains(title))
 
-            del ngrams
-        else:
-            ngram_ids = None
+        if (abstract := getattr(query, "abstract_filter", None)):
+            params.append(Document.abstract.contains(abstract))
 
-        self._vocab_view: VocabView = VocabView(index=ngram_ids, **kwargs)
+        if (citations := getattr(query, "citations_filter", None)):
+            citations = citations.split(",")
+            params.append(Document.citations.between(*citations))
 
-    @property
-    def index(self) -> Iterable[int]:
-        return self._index
+        if (date := getattr(query, "date_filter", None)):
+            date = date.split(",")
+            date = map(lambda d: datetime.strptime(str(d), '%Y'), date)
+            params.append(Document.date.between(*date))
+
+        return params
+
+    def __get_sort_params(self, query: SortBase) -> List:
+        fields = ["doi", "url", "title", "abstract", "citations", "date"]
+
+        params = []
+        for field in fields:
+            if sort := getattr(query, f"{field}_sort", None):
+                sort = int(sort)
+                doc_field = Document[field]
+                params.append(doc_field if sort > 0 else desc(doc_field))
+
+        return params
 
 
-class Corpus(CorpusBase):
+class CorpusController(CorpusControllerBase):
     def __init__(self, **kwargs) -> None:
-        super(Corpus, self).__init__(**kwargs)
+        super(CorpusController, self).__init__(**kwargs)
 
         self._vocab: Vocab = Vocab(**kwargs)
 
     @property
     def index(self) -> Iterable[int]:
         return self._db.index
-
-    def sample(self, size: float | int, random_state: int = None) -> CorpusView:
-        return CorpusView(
-            [*sample(self.index, size=size, random_state=random_state)],
-            **self._kwargs)
 
     def calculate_document_embeddings(self):
         encoder: SBert = SBert()

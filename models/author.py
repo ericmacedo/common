@@ -2,12 +2,13 @@ from dataclasses import dataclass, field
 
 from sqlalchemy import Column, Integer, String
 
-from ..helpers.orm import MapperRegistry
+from ..database import MapperRegistry
+from ..mixins.db import MixinORM
 
 
 @MapperRegistry.mapped
 @dataclass
-class Author:
+class Author(MixinORM):
     __tablename__ = "authors"
     __sa_dataclass_metadata_key__ = "sa"
 

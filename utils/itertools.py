@@ -15,6 +15,10 @@ class SubscriptableGenerator:
         for i in self.__iterable:
             yield i
 
+    def __aiter__(self) -> Generator:
+        for i in self.__iterable:
+            yield i
+
     def __getitem__(self, indexer: int | slice) -> Any | Iterable[Any]:
         if isinstance(indexer, int):
             if indexer >= len(self):

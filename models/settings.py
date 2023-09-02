@@ -5,7 +5,9 @@ from typing import Any, ClassVar, Dict, List
 
 from sqlalchemy import JSON, Column, String, select
 
-from ..helpers.db import DriverDB, MapperRegistry, MixinORM
+from ..database import MapperRegistry
+from ..database.connector import DriverDB
+from ..mixins.db import MixinORM
 
 
 @MapperRegistry.mapped

@@ -5,17 +5,19 @@ from typing import Iterable
 
 import pandas as pd
 from tabulate import tabulate
+from common.database.connector import DriverDB
 
 from common.embeddings.sbert import SBert
 
-from ..helpers.db import DB
+from ..database.service import ServiceDB
 from ..models.ngram import NGram, NGramEmbedding
 
 
 class VocabBase(ABC):
-    def __init__(self, index: Iterable = None, **kwargs):
-        self._db = DB(NGram, index, **kwargs)
-        self._db_embeddings = DB(NGramEmbedding, index, **kwargs)
+    def __init__(self, **kwargs):
+        DriverDB(**kwargs).create_all()
+        self._db = ServiceDB(NGram, **kwargs)
+        self._db_embeddings = ServiceDB(NGramEmbedding, **kwargs)
 
         self._kwargs = kwargs
 
@@ -58,16 +60,6 @@ class VocabBase(ABC):
         ) is not None
 
 
-class VocabView(VocabBase):
-    def __init__(self, index: Iterable[str], **kwargs) -> None:
-        super(VocabView, self).__init__(index, **kwargs)
-        self._index = index
-
-    @property
-    def index(self) -> Iterable[str]:
-        return self._index
-
-
 class Vocab(VocabBase):
     def __init__(self, **kwargs) -> None:
         super(Vocab, self).__init__(**kwargs)
@@ -84,7 +76,7 @@ class Vocab(VocabBase):
         for i in range(0, vocab_size, 1000):
             print(f"Processing NGrams {i:_}-{i+batch_size:_}/{vocab_size:_}",
                   end="\r")
-            ngrams = [*self[i:i+batch_size]]
+            ngrams = [*self[i:i + batch_size]]
             embeddings = encoder.encode_ngrams(
                 [ngram.ngram for ngram in ngrams])
 
